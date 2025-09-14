@@ -71,6 +71,17 @@ This bot works in both Discord servers and direct messages (DMs), giving you enc
 - **Private Key Protection**: Keys are stored locally and never transmitted
 - **Forward Secrecy**: Each message uses the full strength of RSA encryption
 
+## ⚠️ Security Warning
+
+**IMPORTANT**: This bot stores all user private and public keys as **plaintext files** on the server where the bot is running. While the bot provides strong end-to-end encryption for messages, the security is **not 100% guaranteed** because:
+
+- Private keys are stored unencrypted in the `keys/` directory on the server
+- Anyone with access to the server filesystem can read all private keys
+- Server compromise would expose all user private keys
+- No additional encryption layer protects the stored keys
+
+**Use this bot only in environments where you trust the server security and administration.** For maximum security in sensitive environments, consider implementing additional key encryption or using hardware security modules (HSMs).
+
 ## File Structure
 
 ```
@@ -98,6 +109,29 @@ To add this encryption bot to your Discord server:
 4. **Start using** `/help` to see all available commands
 
 The bot works in both Discord servers and direct messages!
+
+## Discord Bot Configuration
+
+If you're hosting this bot yourself and need to configure it on Discord's Developer Portal, use these details:
+
+### Bot Description
+```
+🔒 End-to-end encryption bot for Discord messages using RSA-2048 encryption. Encrypt messages for specific users with digital signatures for authenticity. Features automatic key generation, secure key storage, and context menu decryption. Works in servers and DMs.
+```
+
+### Recommended Tags
+```
+encryption, security, privacy, rsa, end-to-end, cryptography, messaging, discord-bot
+```
+
+### Bot Features for Discord App Directory
+- End-to-end message encryption using RSA-2048
+- Digital signatures for message authenticity  
+- Automatic RSA key pair generation
+- Slash commands for easy encryption
+- Context menu for quick decryption
+- Works in both servers and direct messages
+- Private and secure communication
 
 ## Usage Example
 
