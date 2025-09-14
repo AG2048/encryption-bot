@@ -181,6 +181,8 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
     except Exception as e:
         raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
 
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="help", description="Get help with the encryption bot")
 async def help_command(interaction: discord.Interaction):
     """Display help information"""
@@ -248,6 +250,8 @@ async def help_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="encrypt", description="Encrypt a message for a specific user")
 async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.User):
     """Encrypt a message for a specific user"""
@@ -283,6 +287,8 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         else:
             await interaction.response.send_message(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
 
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="publickey", description="Get a user's public key")
 async def publickey_command(interaction: discord.Interaction, user: discord.User):
     """Get a user's public key"""
@@ -306,6 +312,8 @@ async def publickey_command(interaction: discord.Interaction, user: discord.User
         await interaction.response.send_message(f"❌ Error retrieving public key: {str(e)}", ephemeral=True)
 
 # Context menu for message decryption
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.context_menu(name="Decrypt Message")
 async def decrypt_message_context(interaction: discord.Interaction, message: discord.Message):
     """Context menu to decrypt a message"""
