@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  encryption-bot:
+    build: .
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+    volumes:
+      - ./keys:/app/keys
+    restart: unless-stopped
