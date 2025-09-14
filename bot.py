@@ -234,14 +234,16 @@ async def help_command(interaction: discord.Interaction):
     )
     
     embed.add_field(
-        name="➕ Add Bot to Your Server",
+        name="➕ Add Bot to Your Server/DMs",
         value=(
-            "To add this bot to your own server:\n"
-            "1. Contact the bot owner to get an invite link\n"
-            "2. Or if you have admin permissions, generate an invite with:\n"
-            "   • `applications.commands` scope\n"
-            "   • `bot` scope with `Send Messages` and `Use Slash Commands` permissions\n"
-            "3. The bot works in both servers and DMs!"
+            "**Want to decrypt messages or send encrypted messages?**\n"
+            "This bot works in both Discord servers and direct messages!\n\n"
+            "**To get the bot:**\n"
+            "• Contact the bot owner for an official invite link\n"
+            "• Or if you have admin permissions, generate an invite with:\n"
+            "  - `applications.commands` and `bot` scopes\n"
+            "  - `Send Messages` and `Use Slash Commands` permissions\n\n"
+            "**Once added:** Use `/encrypt` to send encrypted messages!"
         ),
         inline=False
     )
@@ -273,7 +275,18 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
             color=0x00ff00
         )
         embed.add_field(name="Encrypted Data", value=f"```{encrypted_data}```", inline=False)
-        embed.set_footer(text="Right-click this message to decrypt (if you're the recipient)")
+        embed.add_field(
+            name="🔓 How to Decrypt",
+            value=(
+                "**If you have the bot:** Right-click this message → 'Decrypt Message'\n"
+                "**Don't have the bot?** Add it to decrypt your messages:\n"
+                "• Use `/help` in any server with this bot to get an invite link\n"
+                "• Or ask the sender to share the bot invite link\n"
+                "• The bot works in both servers and DMs!"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="🔒 End-to-end encrypted with RSA-2048 • Only the recipient can decrypt")
         
         # Send confirmation to user first (ephemeral)
         await interaction.followup.send("✅ Message encrypted successfully!", ephemeral=True)
