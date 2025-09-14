@@ -16,6 +16,7 @@ from bot import (
     load_user_keys, 
     encrypt_and_sign_message, 
     decrypt_and_verify_message,
+    is_private_key_encrypted,
     KEYS_DIR
 )
 
@@ -137,10 +138,172 @@ def test_multiple_messages():
     
     print("✓ All messages encrypted/decrypted successfully")
 
+def test_password_protected_keys():
+    """Test password-protected private key functionality"""
+    print("\nTesting password-protected keys...")
+    
+    alice_id = 444444444
+    bob_id = 555555555
+    password = "test_password_123"
+    
+    # Clean up test keys
+    for user_id in [alice_id, bob_id]:
+        user_dir = KEYS_DIR / str(user_id)
+        if user_dir.exists():
+            shutil.rmtree(user_dir)
+    
+    # Generate Alice's key with password
+    alice_private, alice_public = generate_user_keys(alice_id, password)
+    print(f"✓ Generated password-protected keys for Alice (user {alice_id})")
+    
+    # Generate Bob's key without password
+    bob_private, bob_public = generate_user_keys(bob_id)
+    print(f"✓ Generated unprotected keys for Bob (user {bob_id})")
+    
+    # Test encryption detection
+    assert is_private_key_encrypted(alice_private), "Alice's key should be encrypted"
+    assert not is_private_key_encrypted(bob_private), "Bob's key should not be encrypted"
+    print("✓ Encryption detection working correctly")
+    
+    # Test message encryption/decryption with password-protected keys
+    message = "Secret message from Alice to Bob with password protection!"
+    
+    # Alice (with password) sends to Bob (without password)
+    encrypted_data = encrypt_and_sign_message(message, alice_id, bob_id, password)
+    decrypted_message = decrypt_and_verify_message(encrypted_data, alice_id, bob_id)
+    assert message == decrypted_message, "Message encryption/decryption failed"
+    print("✓ Alice (password-protected) → Bob (unprotected) successful")
+    
+    # Bob (without password) sends to Alice (with password) 
+    encrypted_data = encrypt_and_sign_message(message, bob_id, alice_id)
+    decrypted_message = decrypt_and_verify_message(encrypted_data, bob_id, alice_id, password)
+    assert message == decrypted_message, "Message encryption/decryption failed"
+    print("✓ Bob (unprotected) → Alice (password-protected) successful")
+    
+    # Test wrong password scenarios
+    try:
+        encrypt_and_sign_message(message, alice_id, bob_id, "wrong_password")
+        assert False, "Should have failed with wrong password"
+    except ValueError as e:
+        print(f"✓ Correctly rejected wrong encryption password: {e}")
+    
+    try:
+        decrypt_and_verify_message(encrypted_data, bob_id, alice_id, "wrong_password")
+        assert False, "Should have failed with wrong password"
+    except ValueError as e:
+        print(f"✓ Correctly rejected wrong decryption password: {e}")
+    
+    # Test missing password scenarios
+    try:
+        encrypt_and_sign_message(message, alice_id, bob_id)  # No password provided
+        assert False, "Should have failed without password"
+    except ValueError as e:
+        print(f"✓ Correctly required password for encryption: {e}")
+    
+    try:
+        decrypt_and_verify_message(encrypted_data, bob_id, alice_id)  # No password provided
+        assert False, "Should have failed without password"
+    except ValueError as e:
+        print(f"✓ Correctly required password for decryption: {e}")
+    
+    print("✓ Password-protected key functionality working correctly")
+
+def test_key_regeneration():
+    """Test key regeneration functionality"""
+    print("\nTesting key regeneration...")
+    
+    charlie_id = 666666666
+    
+    # Clean up test keys
+    charlie_dir = KEYS_DIR / str(charlie_id)
+    if charlie_dir.exists():
+        shutil.rmtree(charlie_dir)
+    
+    # Generate initial keys
+    original_private, original_public = generate_user_keys(charlie_id, "original_password")
+    print(f"✓ Generated initial keys for Charlie (user {charlie_id})")
+    
+    # Generate new keys with different password
+    new_private, new_public = generate_user_keys(charlie_id, "new_password")
+    print(f"✓ Regenerated keys for Charlie with new password")
+    
+    # Verify keys are different
+    assert original_private != new_private, "Private keys should be different after regeneration"
+    assert original_public != new_public, "Public keys should be different after regeneration"
+    print("✓ Keys are different after regeneration")
+    
+    # Verify new keys work
+    message = "Test message after key regeneration"
+    encrypted_data = encrypt_and_sign_message(message, charlie_id, charlie_id, "new_password")
+    decrypted_message = decrypt_and_verify_message(encrypted_data, charlie_id, charlie_id, "new_password")
+    assert message == decrypted_message, "New keys should work correctly"
+    print("✓ New keys work correctly")
+    
+    # Verify old password doesn't work
+    try:
+        encrypt_and_sign_message(message, charlie_id, charlie_id, "original_password")
+        assert False, "Old password should not work after regeneration"
+    except ValueError:
+        print("✓ Old password correctly rejected after regeneration")
+
+def test_mixed_encryption_scenarios():
+    """Test various combinations of encrypted and unencrypted keys"""
+    print("\nTesting mixed encryption scenarios...")
+    
+    # Test user IDs
+    user1 = 777777777  # No password
+    user2 = 888888888  # With password
+    user3 = 999999999  # Different password
+    
+    passwords = {
+        user1: None,
+        user2: "password_user2",
+        user3: "password_user3"
+    }
+    
+    # Clean up test keys
+    for user_id in [user1, user2, user3]:
+        user_dir = KEYS_DIR / str(user_id)
+        if user_dir.exists():
+            shutil.rmtree(user_dir)
+    
+    # Generate keys with different protection levels
+    for user_id, password in passwords.items():
+        generate_user_keys(user_id, password)
+        private_pem, _ = load_user_keys(user_id)
+        expected_encrypted = password is not None
+        actual_encrypted = is_private_key_encrypted(private_pem)
+        assert actual_encrypted == expected_encrypted, f"User {user_id} encryption status mismatch"
+        print(f"✓ User {user_id}: {'encrypted' if password else 'unencrypted'} key generated correctly")
+    
+    # Test all combinations of message sending
+    message = "Test message for mixed scenarios"
+    combinations = [
+        (user1, user2), (user1, user3),  # Unencrypted → Encrypted
+        (user2, user1), (user3, user1),  # Encrypted → Unencrypted
+        (user2, user3), (user3, user2),  # Encrypted → Encrypted (different passwords)
+    ]
+    
+    for sender_id, receiver_id in combinations:
+        sender_password = passwords[sender_id]
+        receiver_password = passwords[receiver_id]
+        
+        # Encrypt message
+        encrypted_data = encrypt_and_sign_message(message, sender_id, receiver_id, sender_password)
+        
+        # Decrypt message
+        decrypted_message = decrypt_and_verify_message(encrypted_data, sender_id, receiver_id, receiver_password)
+        
+        assert message == decrypted_message, f"Failed for sender {sender_id} → receiver {receiver_id}"
+        print(f"✓ User {sender_id} → User {receiver_id} successful")
+    
+    print("✓ All mixed encryption scenarios successful")
+
 def cleanup_test_data():
     """Clean up test data"""
     print("\nCleaning up test data...")
-    test_user_ids = [123456789, 987654321, 111111111, 222222222, 333333333]
+    test_user_ids = [123456789, 987654321, 111111111, 222222222, 333333333, 
+                     444444444, 555555555, 666666666, 777777777, 888888888, 999999999]
     
     for user_id in test_user_ids:
         user_dir = KEYS_DIR / str(user_id)
@@ -160,6 +323,9 @@ def main():
         test_encryption_decryption()
         test_signature_verification()
         test_multiple_messages()
+        test_password_protected_keys()
+        test_key_regeneration()
+        test_mixed_encryption_scenarios()
         
         print("\n" + "=" * 40)
         print("🎉 All tests passed!")
