@@ -274,12 +274,16 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         )
         embed.add_field(name="Encrypted Data", value=f"```{encrypted_data}```", inline=False)
         embed.set_footer(text="Right-click this message to decrypt (if you're the recipient)")
-        
+
         # Send confirmation to user first (ephemeral)
         await interaction.followup.send("✅ Message encrypted successfully!", ephemeral=True)
-        
-        # Then send the encrypted message (public so recipient can see it)
-        await interaction.followup.send(embed=embed, ephemeral=False)
+
+        # Send the encrypted message and ping the receiver
+        await interaction.followup.send(
+            content=f"{receiver.mention} You have received an encrypted message!",
+            embed=embed,
+            ephemeral=False
+        )
         
     except Exception as e:
         if interaction.response.is_done():
