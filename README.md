@@ -16,12 +16,19 @@ A Discord bot that provides end-to-end encryption for messages using RSA encrypt
 
 ### Slash Commands
 
-- `/encrypt <message> <receiver>` - Encrypt a message for a specific user
-- `/publickey <user>` - Get a user's public key
+- `/encrypt <message> <receiver>` - Encrypt a message for a specific user (command is hidden from others)
+- `/publickey <user>` - Get a user's public key (response is private)  
+- `/help` - Show help and instructions (response is private)
+
+**Privacy**: All slash commands are designed to protect your privacy - the original commands are hidden from other users.
 
 ### Context Menu
 
 - Right-click on any encrypted message → "Decrypt Message" - Decrypt and verify a message (only works if you're the intended recipient)
+
+### Universal Support
+
+This bot works in both Discord servers and direct messages (DMs), giving you encrypted communication anywhere on Discord.
 
 ## Setup
 
@@ -78,6 +85,19 @@ encryption-bot/
         ├── private_key.pem
         └── public_key.pem
 ```
+
+## Adding the Bot to Your Server
+
+To add this encryption bot to your Discord server:
+
+1. **Contact the bot owner** to get an official invite link, or
+2. **Generate an invite link** (if you have the bot token) with these required permissions:
+   - **Scopes**: `applications.commands` and `bot`
+   - **Bot Permissions**: `Send Messages` and `Use Slash Commands`
+3. **Click the invite link** and select your server
+4. **Start using** `/help` to see all available commands
+
+The bot works in both Discord servers and direct messages!
 
 ## Usage Example
 

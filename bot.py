@@ -231,6 +231,19 @@ async def help_command(interaction: discord.Interaction):
         inline=False
     )
     
+    embed.add_field(
+        name="➕ Add Bot to Your Server",
+        value=(
+            "To add this bot to your own server:\n"
+            "1. Contact the bot owner to get an invite link\n"
+            "2. Or if you have admin permissions, generate an invite with:\n"
+            "   • `applications.commands` scope\n"
+            "   • `bot` scope with `Send Messages` and `Use Slash Commands` permissions\n"
+            "3. The bot works in both servers and DMs!"
+        ),
+        inline=False
+    )
+    
     embed.set_footer(text="Your private keys are stored securely and never shared.")
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -239,6 +252,9 @@ async def help_command(interaction: discord.Interaction):
 async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.User):
     """Encrypt a message for a specific user"""
     try:
+        # Defer response as ephemeral to hide the command from others
+        await interaction.response.defer(ephemeral=True)
+        
         # Ensure both users have keys
         load_user_keys(interaction.user.id)
         load_user_keys(receiver.id)
@@ -255,10 +271,17 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         embed.add_field(name="Encrypted Data", value=f"```{encrypted_data}```", inline=False)
         embed.set_footer(text="Right-click this message to decrypt (if you're the recipient)")
         
-        await interaction.response.send_message(embed=embed)
+        # Send confirmation to user first (ephemeral)
+        await interaction.followup.send("✅ Message encrypted successfully!", ephemeral=True)
+        
+        # Then send the encrypted message (public so recipient can see it)
+        await interaction.followup.send(embed=embed, ephemeral=False)
         
     except Exception as e:
-        await interaction.response.send_message(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="publickey", description="Get a user's public key")
 async def publickey_command(interaction: discord.Interaction, user: discord.User):
@@ -277,7 +300,7 @@ async def publickey_command(interaction: discord.Interaction, user: discord.User
         )
         embed.add_field(name="Public Key (Base64)", value=f"```{public_key_b64}```", inline=False)
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         
     except Exception as e:
         await interaction.response.send_message(f"❌ Error retrieving public key: {str(e)}", ephemeral=True)
