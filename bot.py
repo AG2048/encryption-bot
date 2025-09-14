@@ -181,6 +181,66 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
     except Exception as e:
         raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
 
+def sign_message(message: str, sender_id: int) -> str:
+    """Sign a message with sender's private key and return plaintext + signature"""
+    # Load sender's private key
+    sender_private_pem, _ = load_user_keys(sender_id)
+    
+    sender_private_key = serialization.load_pem_private_key(
+        sender_private_pem, password=None, backend=default_backend()
+    )
+    
+    # Sign the message
+    message_bytes = message.encode('utf-8')
+    signature = sender_private_key.sign(
+        message_bytes,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    
+    # Combine message and signature, then encode in base64
+    combined = message_bytes + b"||SIGNATURE||" + signature
+    return base64.b64encode(combined).decode('utf-8')
+
+def verify_signed_message(signed_data: str, sender_id: int) -> str:
+    """Verify a signed message with sender's public key and return the original message"""
+    try:
+        # Decode base64
+        combined = base64.b64decode(signed_data.encode('utf-8'))
+        
+        # Split message and signature
+        parts = combined.split(b"||SIGNATURE||")
+        if len(parts) != 2:
+            raise ValueError("Invalid signed message format")
+        
+        message_bytes, signature = parts
+        
+        # Load sender's public key
+        _, sender_public_pem = load_user_keys(sender_id)
+        
+        sender_public_key = serialization.load_pem_public_key(
+            sender_public_pem, backend=default_backend()
+        )
+        
+        # Verify signature
+        sender_public_key.verify(
+            signature,
+            message_bytes,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        return message_bytes.decode('utf-8')
+    
+    except Exception as e:
+        raise ValueError(f"Failed to verify signed message: {str(e)}")
+
 @discord.app_commands.allowed_installs(guilds=True, users=True)
 @discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="help", description="Get help with the encryption bot")
@@ -196,6 +256,7 @@ async def help_command(interaction: discord.Interaction):
         name="📝 Commands",
         value=(
             "`/encrypt <message> <receiver>` - Encrypt a message for a specific user\n"
+            "`/sign <message>` - Sign a message for authenticity verification\n"
             "`/publickey <user>` - Get a user's public key\n"
             "`/help` - Show this help message"
         ),
@@ -204,7 +265,10 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="🖱️ Context Menu",
-        value="Right-click on any encrypted message → **Decrypt Message**",
+        value=(
+            "Right-click on any encrypted message → **Decrypt Message**\n"
+            "Right-click on any signed message → **Verify Signature**"
+        ),
         inline=False
     )
     
@@ -311,6 +375,43 @@ async def publickey_command(interaction: discord.Interaction, user: discord.User
     except Exception as e:
         await interaction.response.send_message(f"❌ Error retrieving public key: {str(e)}", ephemeral=True)
 
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@bot.tree.command(name="sign", description="Sign a message for authenticity verification")
+async def sign_command(interaction: discord.Interaction, message: str):
+    """Sign a message with digital signature"""
+    try:
+        # Defer response as ephemeral to hide the command from others
+        await interaction.response.defer(ephemeral=True)
+        
+        # Ensure user has keys
+        load_user_keys(interaction.user.id)
+        
+        # Sign the message
+        signed_data = sign_message(message, interaction.user.id)
+        
+        # Create embed for the signed message
+        embed = discord.Embed(
+            title="✍️ Signed Message",
+            description=f"**From:** {interaction.user.mention}",
+            color=0xffa500
+        )
+        embed.add_field(name="Message", value=message, inline=False)
+        embed.add_field(name="Signature Data", value=f"```{signed_data}```", inline=False)
+        embed.set_footer(text="Right-click this message to verify signature authenticity")
+        
+        # Send confirmation to user first (ephemeral)
+        await interaction.followup.send("✅ Message signed successfully!", ephemeral=True)
+        
+        # Then send the signed message (public so others can see it)
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        
+    except Exception as e:
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ Error signing message: {str(e)}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error signing message: {str(e)}", ephemeral=True)
+
 # Context menu for message decryption
 @discord.app_commands.allowed_installs(guilds=True, users=True)
 @discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -401,6 +502,97 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
             await interaction.followup.send(f"❌ Error decrypting message: {str(e)}", ephemeral=True)
         else:
             await interaction.response.send_message(f"❌ Error decrypting message: {str(e)}", ephemeral=True)
+
+# Context menu for signature verification
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@bot.tree.context_menu(name="Verify Signature")
+async def verify_signature_context(interaction: discord.Interaction, message: discord.Message):
+    """Context menu to verify a signed message"""
+    try:
+        # Check if message contains a signed message embed
+        if not message.embeds:
+            await interaction.response.send_message("❌ This message doesn't contain a signed message.", ephemeral=True)
+            return
+        
+        embed = message.embeds[0]
+        if embed.title != "✍️ Signed Message":
+            await interaction.response.send_message("❌ This message doesn't contain a signed message.", ephemeral=True)
+            return
+        
+        # Check if the message is sent by the bot
+        if message.author.id != bot.user.id:
+            await interaction.response.send_message("❌ This message was not sent by the encryption bot.", ephemeral=True)
+            return
+        
+        # Extract signed data from embed
+        signed_data = None
+        original_message = None
+        for field in embed.fields:
+            if field.name == "Signature Data":
+                signed_data = field.value.strip("```")
+            elif field.name == "Message":
+                original_message = field.value
+        
+        if not signed_data:
+            await interaction.response.send_message("❌ Could not find signature data in message.", ephemeral=True)
+            return
+        
+        # Extract sender information from embed description
+        description_lines = embed.description.split('\n')
+        sender_id = None
+        
+        for line in description_lines:
+            if line.startswith("**From:**"):
+                # Extract user ID from mention
+                import re
+                sender_match = re.search(r'<@(\d+)>', line)
+                if sender_match:
+                    sender_id = int(sender_match.group(1))
+                break
+        
+        if not sender_id:
+            await interaction.response.send_message("❌ Could not identify message sender.", ephemeral=True)
+            return
+        
+        # Defer response since verification might take a moment
+        await interaction.response.defer(ephemeral=True)
+        
+        # Verify the signed message
+        verified_message = verify_signed_message(signed_data, sender_id)
+        
+        # Check if the verified message matches the displayed message
+        is_authentic = verified_message == original_message
+        
+        # Send verification result (ephemeral so only the user can see it)
+        embed = discord.Embed(
+            title="🔍 Signature Verification Result",
+            description=f"**From:** <@{sender_id}>",
+            color=0x00ff00 if is_authentic else 0xff0000
+        )
+        
+        if is_authentic:
+            embed.add_field(name="✅ Verification Status", value="**AUTHENTIC** - Signature is valid", inline=False)
+            embed.add_field(name="Original Message", value=verified_message, inline=False)
+            embed.set_footer(text="✅ This message is authentic and has not been tampered with")
+        else:
+            embed.add_field(name="❌ Verification Status", value="**TAMPERED** - Message has been modified", inline=False)
+            embed.add_field(name="Displayed Message", value=original_message or "N/A", inline=False)
+            embed.add_field(name="Original Signed Message", value=verified_message, inline=False)
+            embed.set_footer(text="⚠️ WARNING: The displayed message does not match the signed content!")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except ValueError as e:
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ Signature verification failed: {str(e)}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Signature verification failed: {str(e)}", ephemeral=True)
+    except Exception as e:
+        if interaction.response.is_done():
+            await interaction.followup.send(f"❌ Error verifying signature: {str(e)}", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ Error verifying signature: {str(e)}", ephemeral=True)
 
 if __name__ == "__main__":
     # You need to set your bot token as an environment variable
