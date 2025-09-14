@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+from dotenv import load_dotenv
 import base64
 import asyncio
 from pathlib import Path
@@ -235,7 +236,7 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="encrypt", description="Encrypt a message for a specific user")
-async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.Member):
+async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.User):
     """Encrypt a message for a specific user"""
     try:
         # Ensure both users have keys
@@ -260,7 +261,7 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         await interaction.response.send_message(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="publickey", description="Get a user's public key")
-async def publickey_command(interaction: discord.Interaction, user: discord.Member):
+async def publickey_command(interaction: discord.Interaction, user: discord.User):
     """Get a user's public key"""
     try:
         # Ensure user has keys
@@ -294,6 +295,11 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
         embed = message.embeds[0]
         if embed.title != "🔒 Encrypted Message":
             await interaction.response.send_message("❌ This message doesn't contain an encrypted message.", ephemeral=True)
+            return
+        
+        # Check if the message is sent by the bot
+        if message.author.id != bot.user.id:
+            await interaction.response.send_message("❌ This message was not sent by the encryption bot.", ephemeral=True)
             return
         
         # Extract encrypted data from embed
@@ -332,11 +338,6 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
         
         receiver_id = interaction.user.id
         
-        # Check if the user is trying to decrypt their own message
-        if sender_id == receiver_id:
-            await interaction.response.send_message("❌ You cannot decrypt your own message.", ephemeral=True)
-            return
-        
         # Check if the user is the intended recipient
         if intended_receiver_id and intended_receiver_id != receiver_id:
             await interaction.response.send_message("❌ This message is not intended for you.", ephemeral=True)
@@ -372,6 +373,7 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
 
 if __name__ == "__main__":
     # You need to set your bot token as an environment variable
+    load_dotenv()
     token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
         print("Please set the DISCORD_BOT_TOKEN environment variable")
