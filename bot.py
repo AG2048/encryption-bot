@@ -278,7 +278,7 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         embed.add_field(
             name="🔓 How to Decrypt",
             value=(
-                "**If you have the bot:** Right-click this message → 'Decrypt Message'\n"
+                "**If you have the bot:** Right-click this message → 'Apps' → 'Decrypt Message'\n"
                 "**Don't have the bot?** Add it to decrypt your messages:\n"
                 "• Use `/help` in any server with this bot to get an invite link\n"
                 "• Or ask the sender to share the bot invite link\n"
