@@ -414,7 +414,18 @@ async def sign_command(interaction: discord.Interaction, message: str):
         )
         embed.add_field(name="Message", value=message, inline=False)
         embed.add_field(name="Signature Data", value=f"```{signed_data}```", inline=False)
-        embed.set_footer(text="Right-click this message to verify signature authenticity")
+        embed.add_field(
+            name="🔍 How to Verify",
+            value=(
+                "**If you have the bot:** Right-click this message → 'Apps' → 'Verify Signature'\n"
+                "**Don't have the bot?** Add it to verify signatures:\n"
+                "• Use `/help` in any server with this bot to get an invite link\n"
+                "• Or ask the sender to share the bot invite link\n"
+                "• The bot works in both servers and DMs!"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="✍️ Digitally signed with RSA-2048 • Verify authenticity with the bot")
         
         # Send confirmation to user first (ephemeral)
         await interaction.followup.send("✅ Message signed successfully!", ephemeral=True)
