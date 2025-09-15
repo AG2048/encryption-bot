@@ -65,13 +65,13 @@ This bot works in both Discord servers and direct messages (DMs), giving you enc
    - Message is signed with the sender's private key using PSS padding
    - Original message and signature are combined and encoded in base64
 
-4. **Decryption Process** (right-click "Decrypt Message"):
+4. **Decryption Process** (right-click "Apps" → "Decrypt Message"):
    - Base64 data is decoded and split into encrypted message and signature
    - Signature is verified using the sender's public key
    - Message is decrypted using the recipient's private key
    - Only successful if both verification and decryption succeed
 
-5. **Verification Process** (right-click "Verify Signature"):
+5. **Verification Process** (right-click "Apps" → "Verify Signature"):
    - Base64 data is decoded and split into plaintext message and signature
    - Signature is verified using the sender's public key
    - Shows whether the message is authentic or has been tampered with
@@ -159,7 +159,7 @@ encryption, security, privacy, rsa, end-to-end, cryptography, messaging, discord
 
 2. Bot generates keys for both users (if needed) and posts an encrypted message embed
 
-3. Bob right-clicks on the encrypted message and selects "Decrypt Message"
+3. Bob right-clicks on the encrypted message and selects "Apps" → "Decrypt Message"
 
 4. Bot verifies Alice's signature and decrypts the message for Bob (shown only to Bob)
 
@@ -172,7 +172,7 @@ encryption, security, privacy, rsa, end-to-end, cryptography, messaging, discord
 
 2. Bot generates keys for Alice (if needed) and posts a signed message embed showing the plaintext + signature
 
-3. Anyone can right-click on the signed message and select "Verify Signature"
+3. Anyone can right-click on the signed message and select "Apps" → "Verify Signature"
 
 4. Bot verifies Alice's signature and shows whether the message is authentic
 
