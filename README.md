@@ -91,6 +91,8 @@ encryption-bot/
 ├── .env.example       # Environment variable template
 ├── .gitignore         # Git ignore file
 ├── README.md          # This file
+├── assets/            # Visual assets
+│   └── icons/         # Bot profile icons
 └── keys/              # User key storage (created automatically)
     └── <user_id>/
         ├── private_key.pem
@@ -109,6 +111,10 @@ To add this encryption bot to your Discord server:
 4. **Start using** `/help` to see all available commands
 
 The bot works in both Discord servers and direct messages!
+
+## Bot Icon
+
+The repository includes a professional bot icon located in `assets/icons/`. The icon features a blue padlock design that represents the encryption theme of the bot. Use `assets/icons/bot_icon_256.png` when setting up your bot's profile picture in the Discord Developer Portal.
 
 ## Discord Bot Configuration
 
