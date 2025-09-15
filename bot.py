@@ -13,6 +13,96 @@ from cryptography.hazmat.backends import default_backend
 KEYS_DIR = Path("keys")
 KEYS_DIR.mkdir(exist_ok=True)
 
+class PasswordModal(discord.ui.Modal, title='Enter Password'):
+    """Modal for entering password for private key operations"""
+    
+    password = discord.ui.TextInput(
+        label='Password',
+        placeholder='Enter your private key password...',
+        style=discord.TextStyle.short,
+        max_length=256,
+        required=True
+    )
+    
+    def __init__(self, callback_func, *args, **kwargs):
+        super().__init__(title='Enter Password')
+        self.callback_func = callback_func
+        self.args = args
+        self.kwargs = kwargs
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        password = self.password.value
+        await self.callback_func(interaction, password, *self.args, **self.kwargs)
+
+class RegenerateKeyModal(discord.ui.Modal, title='Regenerate Private Key'):
+    """Modal for regenerating private key with optional password"""
+    
+    password = discord.ui.TextInput(
+        label='Password (Optional)',
+        placeholder='Enter a password to protect your private key (leave empty for no password)',
+        style=discord.TextStyle.short,
+        max_length=256,
+        required=False
+    )
+    
+    def __init__(self, user_id: int):
+        super().__init__()
+        self.user_id = user_id
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        password = self.password.value.strip() if self.password.value else None
+        
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # Generate new keys with optional password
+            generate_user_keys(self.user_id, password)
+            
+            if password:
+                await interaction.followup.send(
+                    "✅ Your private key has been regenerated with password protection!\n"
+                    "⚠️ **IMPORTANT**: Remember your password - it cannot be recovered if lost.\n"
+                    "🔒 You will be asked for this password when decrypting messages or signing.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "✅ Your private key has been regenerated without password protection.\n"
+                    "⚠️ All previously encrypted messages sent to you are now unreadable.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ Error regenerating key: {str(e)}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ Error regenerating key: {str(e)}", ephemeral=True)
+
+class ConfirmRegenerateView(discord.ui.View):
+    """View with confirmation button for key regeneration"""
+    
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.user_id = user_id
+    
+    @discord.ui.button(label='Confirm Regenerate Key', style=discord.ButtonStyle.danger, emoji='⚠️')
+    async def confirm_regenerate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ You can only regenerate your own keys.", ephemeral=True)
+            return
+            
+        modal = RegenerateKeyModal(self.user_id)
+        await interaction.response.send_modal(modal)
+    
+    @discord.ui.button(label='Cancel', style=discord.ButtonStyle.secondary)
+    async def cancel_regenerate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your regeneration request.", ephemeral=True)
+            return
+            
+        await interaction.response.send_message("❌ Key regeneration cancelled.", ephemeral=True)
+        self.stop()
+
 class EncryptionBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -42,7 +132,7 @@ def get_user_keys_path(user_id: int) -> tuple[Path, Path]:
     public_key_path = user_dir / "public_key.pem"
     return private_key_path, public_key_path
 
-def generate_user_keys(user_id: int) -> tuple[bytes, bytes]:
+def generate_user_keys(user_id: int, password: str = None) -> tuple[bytes, bytes]:
     """Generate RSA key pair for a user and save to files"""
     # Generate private key
     private_key = rsa.generate_private_key(
@@ -54,11 +144,16 @@ def generate_user_keys(user_id: int) -> tuple[bytes, bytes]:
     # Get public key
     public_key = private_key.public_key()
     
-    # Serialize private key
+    # Serialize private key with or without password
+    if password:
+        encryption_algorithm = serialization.BestAvailableEncryption(password.encode('utf-8'))
+    else:
+        encryption_algorithm = serialization.NoEncryption()
+    
     private_pem = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
+        encryption_algorithm=encryption_algorithm
     )
     
     # Serialize public key
@@ -78,6 +173,47 @@ def generate_user_keys(user_id: int) -> tuple[bytes, bytes]:
     
     return private_pem, public_pem
 
+def is_private_key_encrypted(user_id: int) -> bool:
+    """Check if a user's private key is password-protected"""
+    private_key_path, _ = get_user_keys_path(user_id)
+    
+    if not private_key_path.exists():
+        return False
+    
+    try:
+        with open(private_key_path, 'rb') as f:
+            private_pem = f.read()
+        
+        # Try to load without password
+        serialization.load_pem_private_key(
+            private_pem, password=None, backend=default_backend()
+        )
+        return False  # Successfully loaded without password
+    except TypeError:
+        return True  # Failed to load without password, so it's encrypted
+
+def load_private_key_with_password(user_id: int, password: str = None):
+    """Load a private key with optional password"""
+    private_key_path, _ = get_user_keys_path(user_id)
+    
+    if not private_key_path.exists():
+        raise ValueError("Private key not found")
+    
+    with open(private_key_path, 'rb') as f:
+        private_pem = f.read()
+    
+    password_bytes = password.encode('utf-8') if password else None
+    
+    try:
+        return serialization.load_pem_private_key(
+            private_pem, password=password_bytes, backend=default_backend()
+        )
+    except (ValueError, TypeError) as e:
+        if password is None:
+            raise ValueError("Private key is password-protected but no password provided")
+        else:
+            raise ValueError("Invalid password for private key")
+
 def load_user_keys(user_id: int) -> tuple[bytes, bytes]:
     """Load user's keys from files, generate if they don't exist"""
     private_key_path, public_key_path = get_user_keys_path(user_id)
@@ -94,7 +230,7 @@ def load_user_keys(user_id: int) -> tuple[bytes, bytes]:
     return private_pem, public_pem
 
 def encrypt_and_sign_message(message: str, sender_id: int, receiver_id: int) -> str:
-    """Encrypt message with receiver's public key and sign with sender's private key"""
+    """Encrypt message with receiver's public key and sign with sender's private key (no password support)"""
     # Load sender's private key and receiver's public key
     sender_private_pem, _ = load_user_keys(sender_id)
     _, receiver_public_pem = load_user_keys(receiver_id)
@@ -131,8 +267,42 @@ def encrypt_and_sign_message(message: str, sender_id: int, receiver_id: int) -> 
     combined = encrypted_message + b"||SIGNATURE||" + signature
     return base64.b64encode(combined).decode('utf-8')
 
+def encrypt_and_sign_message_with_password(message: str, sender_id: int, receiver_id: int, sender_password: str = None) -> str:
+    """Encrypt message with receiver's public key and sign with sender's private key (with password support)"""
+    # Load sender's private key with password and receiver's public key
+    sender_private_key = load_private_key_with_password(sender_id, sender_password)
+    _, receiver_public_pem = load_user_keys(receiver_id)
+    
+    receiver_public_key = serialization.load_pem_public_key(
+        receiver_public_pem, backend=default_backend()
+    )
+    
+    # Encrypt the message with receiver's public key
+    encrypted_message = receiver_public_key.encrypt(
+        message.encode('utf-8'),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    
+    # Sign the encrypted message with sender's private key
+    signature = sender_private_key.sign(
+        encrypted_message,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    
+    # Combine encrypted message and signature, then encode in base64
+    combined = encrypted_message + b"||SIGNATURE||" + signature
+    return base64.b64encode(combined).decode('utf-8')
+
 def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id: int) -> str:
-    """Decrypt message with receiver's private key and verify signature with sender's public key"""
+    """Decrypt message with receiver's private key and verify signature with sender's public key (no password support)"""
     try:
         # Decode base64
         combined = base64.b64decode(encrypted_data.encode('utf-8'))
@@ -181,14 +351,81 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
     except Exception as e:
         raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
 
+def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, receiver_password: str = None) -> str:
+    """Decrypt message with receiver's private key and verify signature with sender's public key (with password support)"""
+    try:
+        # Decode base64
+        combined = base64.b64decode(encrypted_data.encode('utf-8'))
+        
+        # Split encrypted message and signature
+        parts = combined.split(b"||SIGNATURE||")
+        if len(parts) != 2:
+            raise ValueError("Invalid message format")
+        
+        encrypted_message, signature = parts
+        
+        # Load receiver's private key with password and sender's public key
+        receiver_private_key = load_private_key_with_password(receiver_id, receiver_password)
+        _, sender_public_pem = load_user_keys(sender_id)
+        
+        sender_public_key = serialization.load_pem_public_key(
+            sender_public_pem, backend=default_backend()
+        )
+        
+        # Verify signature
+        sender_public_key.verify(
+            signature,
+            encrypted_message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        # Decrypt message
+        decrypted_message = receiver_private_key.decrypt(
+            encrypted_message,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        
+        return decrypted_message.decode('utf-8')
+    
+    except Exception as e:
+        raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
+
 def sign_message(message: str, sender_id: int) -> str:
-    """Sign a message with sender's private key and return plaintext + signature"""
+    """Sign a message with sender's private key and return plaintext + signature (no password support)"""
     # Load sender's private key
     sender_private_pem, _ = load_user_keys(sender_id)
     
     sender_private_key = serialization.load_pem_private_key(
         sender_private_pem, password=None, backend=default_backend()
     )
+    
+    # Sign the message
+    message_bytes = message.encode('utf-8')
+    signature = sender_private_key.sign(
+        message_bytes,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    
+    # Combine message and signature, then encode in base64
+    combined = message_bytes + b"||SIGNATURE||" + signature
+    return base64.b64encode(combined).decode('utf-8')
+
+def sign_message_with_password(message: str, sender_id: int, sender_password: str = None) -> str:
+    """Sign a message with sender's private key and return plaintext + signature (with password support)"""
+    # Load sender's private key with password
+    sender_private_key = load_private_key_with_password(sender_id, sender_password)
     
     # Sign the message
     message_bytes = message.encode('utf-8')
@@ -243,6 +480,43 @@ def verify_signed_message(signed_data: str, sender_id: int) -> str:
 
 @discord.app_commands.allowed_installs(guilds=True, users=True)
 @discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@bot.tree.command(name="regenerate-key", description="Regenerate your private key (WARNING: You'll lose access to old messages)")
+async def regenerate_key_command(interaction: discord.Interaction):
+    """Regenerate user's private key with confirmation"""
+    
+    embed = discord.Embed(
+        title="⚠️ Regenerate Private Key",
+        description=(
+            "**WARNING**: Regenerating your private key will make ALL previously encrypted messages "
+            "sent to you **UNREADABLE FOREVER**.\n\n"
+            "This includes:\n"
+            "• Any encrypted messages you've received\n"
+            "• Messages in your DMs or servers\n"
+            "• Messages from any time period\n\n"
+            "**This action CANNOT be undone!**\n\n"
+            "You can optionally set a password to protect your new private key. "
+            "If you set a password, you'll need to enter it every time you decrypt messages or sign content."
+        ),
+        color=0xff0000
+    )
+    
+    embed.add_field(
+        name="🔄 What happens next?",
+        value=(
+            "1. Click 'Confirm Regenerate Key' below\n"
+            "2. Optionally enter a password for protection\n"
+            "3. Your new key pair will be generated\n"
+            "4. You can receive new encrypted messages"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="⚠️ This action is PERMANENT and IRREVERSIBLE")
+    
+    view = ConfirmRegenerateView(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @bot.tree.command(name="help", description="Get help with the encryption bot")
 async def help_command(interaction: discord.Interaction):
     """Display help information"""
@@ -258,6 +532,7 @@ async def help_command(interaction: discord.Interaction):
             "`/encrypt <message> <receiver>` - Encrypt a message for a specific user\n"
             "`/sign <message>` - Sign a message for authenticity verification\n"
             "`/publickey <user>` - Get a user's public key\n"
+            "`/regenerate-key` - Regenerate your private key (with optional password)\n"
             "`/help` - Show this help message"
         ),
         inline=False
@@ -316,21 +591,15 @@ async def help_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@discord.app_commands.allowed_installs(guilds=True, users=True)
-@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@bot.tree.command(name="encrypt", description="Encrypt a message for a specific user")
-async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.User):
-    """Encrypt a message for a specific user"""
+async def encrypt_with_password_check(interaction: discord.Interaction, message: str, receiver: discord.User, sender_password: str = None):
+    """Helper function to encrypt message after password check"""
     try:
-        # Defer response as ephemeral to hide the command from others
-        await interaction.response.defer(ephemeral=True)
-        
         # Ensure both users have keys
         load_user_keys(interaction.user.id)
         load_user_keys(receiver.id)
         
         # Encrypt and sign the message
-        encrypted_data = encrypt_and_sign_message(message, interaction.user.id, receiver.id)
+        encrypted_data = encrypt_and_sign_message_with_password(message, interaction.user.id, receiver.id, sender_password)
         
         # Create embed for the encrypted message
         embed = discord.Embed(
@@ -351,8 +620,12 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
             inline=False
         )
         embed.set_footer(text="🔒 End-to-end encrypted with RSA-2048 • Only the recipient can decrypt")
+        
         # Send confirmation to user first (ephemeral)
-        await interaction.followup.send("✅ Message encrypted successfully!", ephemeral=True)
+        if interaction.response.is_done():
+            await interaction.followup.send("✅ Message encrypted successfully!", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ Message encrypted successfully!", ephemeral=True)
 
         # Send the encrypted message and ping the receiver
         await interaction.followup.send(
@@ -362,10 +635,33 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         )
         
     except Exception as e:
+        error_msg = f"❌ Error encrypting message: {str(e)}"
         if interaction.response.is_done():
-            await interaction.followup.send(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
+            await interaction.followup.send(error_msg, ephemeral=True)
         else:
+            await interaction.response.send_message(error_msg, ephemeral=True)
+
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@bot.tree.command(name="encrypt", description="Encrypt a message for a specific user")
+async def encrypt_command(interaction: discord.Interaction, message: str, receiver: discord.User):
+    """Encrypt a message for a specific user"""
+    try:
+        # Check if sender's private key is password-protected
+        if is_private_key_encrypted(interaction.user.id):
+            # Need password - show modal
+            modal = PasswordModal(encrypt_with_password_check, message, receiver)
+            await interaction.response.send_modal(modal)
+        else:
+            # No password needed - use regular function
+            await interaction.response.defer(ephemeral=True)
+            await encrypt_with_password_check(interaction, message, receiver)
+            
+    except Exception as e:
+        if not interaction.response.is_done():
             await interaction.response.send_message(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ Error encrypting message: {str(e)}", ephemeral=True)
 
 @discord.app_commands.allowed_installs(guilds=True, users=True)
 @discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -391,20 +687,14 @@ async def publickey_command(interaction: discord.Interaction, user: discord.User
     except Exception as e:
         await interaction.response.send_message(f"❌ Error retrieving public key: {str(e)}", ephemeral=True)
 
-@discord.app_commands.allowed_installs(guilds=True, users=True)
-@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-@bot.tree.command(name="sign", description="Sign a message for authenticity verification")
-async def sign_command(interaction: discord.Interaction, message: str):
-    """Sign a message with digital signature"""
+async def sign_with_password_check(interaction: discord.Interaction, message: str, sender_password: str = None):
+    """Helper function to sign message after password check"""
     try:
-        # Defer response as ephemeral to hide the command from others
-        await interaction.response.defer(ephemeral=True)
-        
         # Ensure user has keys
         load_user_keys(interaction.user.id)
         
         # Sign the message
-        signed_data = sign_message(message, interaction.user.id)
+        signed_data = sign_message_with_password(message, interaction.user.id, sender_password)
         
         # Create embed for the signed message
         embed = discord.Embed(
@@ -428,16 +718,83 @@ async def sign_command(interaction: discord.Interaction, message: str):
         embed.set_footer(text="✍️ Digitally signed with RSA-2048 • Verify authenticity with the bot")
         
         # Send confirmation to user first (ephemeral)
-        await interaction.followup.send("✅ Message signed successfully!", ephemeral=True)
+        if interaction.response.is_done():
+            await interaction.followup.send("✅ Message signed successfully!", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ Message signed successfully!", ephemeral=True)
         
         # Then send the signed message (public so others can see it)
         await interaction.followup.send(embed=embed, ephemeral=False)
         
     except Exception as e:
+        error_msg = f"❌ Error signing message: {str(e)}"
         if interaction.response.is_done():
-            await interaction.followup.send(f"❌ Error signing message: {str(e)}", ephemeral=True)
+            await interaction.followup.send(error_msg, ephemeral=True)
         else:
+            await interaction.response.send_message(error_msg, ephemeral=True)
+
+@discord.app_commands.allowed_installs(guilds=True, users=True)
+@discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@bot.tree.command(name="sign", description="Sign a message for authenticity verification")
+async def sign_command(interaction: discord.Interaction, message: str):
+    """Sign a message with digital signature"""
+    try:
+        # Check if sender's private key is password-protected
+        if is_private_key_encrypted(interaction.user.id):
+            # Need password - show modal
+            modal = PasswordModal(sign_with_password_check, message)
+            await interaction.response.send_modal(modal)
+        else:
+            # No password needed - use regular function
+            await interaction.response.defer(ephemeral=True)
+            await sign_with_password_check(interaction, message)
+            
+    except Exception as e:
+        if not interaction.response.is_done():
             await interaction.response.send_message(f"❌ Error signing message: {str(e)}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ Error signing message: {str(e)}", ephemeral=True)
+
+async def decrypt_with_password_check(interaction: discord.Interaction, receiver_password: str, encrypted_data: str, sender_id: int, receiver_id: int, intended_receiver_id: int):
+    """Helper function to decrypt message after password check"""
+    try:
+        # Check if the user is the intended recipient
+        if intended_receiver_id and intended_receiver_id != receiver_id:
+            await interaction.response.send_message("❌ This message is not intended for you.", ephemeral=True)
+            return
+        
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+        
+        # Decrypt and verify the message
+        decrypted_message = decrypt_and_verify_message_with_password(encrypted_data, sender_id, receiver_id, receiver_password)
+        
+        # Send decrypted message (ephemeral so only the user can see it)
+        embed = discord.Embed(
+            title="🔓 Decrypted Message",
+            description=f"**From:** <@{sender_id}>\n**To:** <@{receiver_id}>",
+            color=0xff9900
+        )
+        embed.add_field(name="Original Message", value=decrypted_message, inline=False)
+        embed.set_footer(text="✅ Signature verified - message is authentic")
+        
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    except ValueError as e:
+        error_msg = f"❌ Decryption failed: {str(e)}"
+        if interaction.response.is_done():
+            await interaction.followup.send(error_msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(error_msg, ephemeral=True)
+    except Exception as e:
+        error_msg = f"❌ Error decrypting message: {str(e)}"
+        if interaction.response.is_done():
+            await interaction.followup.send(error_msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(error_msg, ephemeral=True)
 
 # Context menu for message decryption
 @discord.app_commands.allowed_installs(guilds=True, users=True)
@@ -497,38 +854,20 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
         
         receiver_id = interaction.user.id
         
-        # Check if the user is the intended recipient
-        if intended_receiver_id and intended_receiver_id != receiver_id:
-            await interaction.response.send_message("❌ This message is not intended for you.", ephemeral=True)
-            return
-        
-        # Defer response since decryption might take a moment
-        await interaction.response.defer(ephemeral=True)
-        
-        # Decrypt and verify the message
-        decrypted_message = decrypt_and_verify_message(encrypted_data, sender_id, receiver_id)
-        
-        # Send decrypted message (ephemeral so only the user can see it)
-        embed = discord.Embed(
-            title="🔓 Decrypted Message",
-            description=f"**From:** <@{sender_id}>\n**To:** {interaction.user.mention}",
-            color=0xff9900
-        )
-        embed.add_field(name="Original Message", value=decrypted_message, inline=False)
-        embed.set_footer(text="✅ Signature verified - message is authentic")
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        
-    except ValueError as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"❌ Decryption failed: {str(e)}", ephemeral=True)
+        # Check if receiver's private key is password-protected
+        if is_private_key_encrypted(receiver_id):
+            # Need password - show modal
+            modal = PasswordModal(decrypt_with_password_check, encrypted_data, sender_id, receiver_id, intended_receiver_id)
+            await interaction.response.send_modal(modal)
         else:
-            await interaction.response.send_message(f"❌ Decryption failed: {str(e)}", ephemeral=True)
+            # No password needed - use regular function
+            await decrypt_with_password_check(interaction, None, encrypted_data, sender_id, receiver_id, intended_receiver_id)
+        
     except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(f"❌ Error decrypting message: {str(e)}", ephemeral=True)
-        else:
+        if not interaction.response.is_done():
             await interaction.response.send_message(f"❌ Error decrypting message: {str(e)}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ Error decrypting message: {str(e)}", ephemeral=True)
 
 # Context menu for signature verification
 @discord.app_commands.allowed_installs(guilds=True, users=True)
