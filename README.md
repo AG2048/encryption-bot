@@ -9,6 +9,7 @@ A Discord bot that provides end-to-end encryption for messages using RSA encrypt
 - **Digital Signatures**: All encrypted messages are signed with the sender's private key for authenticity
 - **Signature Verification**: Verify the authenticity of signed messages using digital signatures
 - **Automatic Key Generation**: RSA-2048 key pairs are automatically generated for users when first needed
+- **Private Key Password Protection**: Optional password protection for private keys with regeneration capability
 - **Secure Key Storage**: Private keys are stored securely in individual user directories
 - **Base64 Encoding**: All encrypted and signed data is encoded in base64 for easy transmission
 - **Context Menu Operations**: Right-click on messages to decrypt or verify signatures
@@ -21,6 +22,7 @@ A Discord bot that provides end-to-end encryption for messages using RSA encrypt
 - `/encrypt <message> <receiver>` - Encrypt a message for a specific user (command is hidden from others)
 - `/sign <message>` - Sign a message for authenticity verification (plaintext + signature)
 - `/publickey <user>` - Get a user's public key (response is private)  
+- `/regenerate-key` - Regenerate your private key with optional password protection (response is private)
 - `/help` - Show help and instructions (response is private)
 
 **Privacy**: All slash commands are designed to protect your privacy - the original commands are hidden from other users.
@@ -53,25 +55,30 @@ This bot works in both Discord servers and direct messages (DMs), giving you enc
 
 ## How it Works
 
-1. **Key Generation**: When a user is first mentioned in an encrypt/sign command or their public key is requested, the bot generates a 2048-bit RSA key pair and stores it in the `keys/` directory.
+1. **Key Generation**: When a user is first mentioned in an encrypt/sign command or their public key is requested, the bot generates a 2048-bit RSA key pair and stores it in the `keys/` directory. Users can optionally regenerate their keys with password protection using `/regenerate-key`.
 
-2. **Encryption Process** (for `/encrypt` command):
+2. **Password Protection**: Users can protect their private keys with a password during regeneration. When a password-protected key is used for encryption or signing, the bot will prompt for the password via a secure modal dialog.
+
+3. **Encryption Process** (for `/encrypt` command):
    - Message is encrypted with the recipient's public key using OAEP padding
    - Encrypted message is signed with the sender's private key using PSS padding
+   - If sender's key is password-protected, password is requested securely
    - Both encrypted message and signature are combined and encoded in base64
 
-3. **Signing Process** (for `/sign` command):
+4. **Signing Process** (for `/sign` command):
    - Message remains in plaintext for everyone to read
    - Message is signed with the sender's private key using PSS padding
+   - If sender's key is password-protected, password is requested securely
    - Original message and signature are combined and encoded in base64
 
-4. **Decryption Process** (right-click "Apps" → "Decrypt Message"):
+5. **Decryption Process** (right-click "Apps" → "Decrypt Message"):
    - Base64 data is decoded and split into encrypted message and signature
    - Signature is verified using the sender's public key
+   - If recipient's key is password-protected, password is requested securely
    - Message is decrypted using the recipient's private key
    - Only successful if both verification and decryption succeed
 
-5. **Verification Process** (right-click "Apps" → "Verify Signature"):
+6. **Verification Process** (right-click "Apps" → "Verify Signature"):
    - Base64 data is decoded and split into plaintext message and signature
    - Signature is verified using the sender's public key
    - Shows whether the message is authentic or has been tampered with
@@ -83,18 +90,32 @@ This bot works in both Discord servers and direct messages (DMs), giving you enc
 - **PSS Signatures**: Probabilistic Signature Scheme for tamper detection
 - **SHA-256 Hashing**: Cryptographically secure hash function
 - **Private Key Protection**: Keys are stored locally and never transmitted
+- **Password-Protected Keys**: Optional password protection for private keys
+- **Secure Password Input**: Password entry via secure modal dialogs (never logged)
 - **Forward Secrecy**: Each message uses the full strength of RSA encryption
 
 ## ⚠️ Security Warning
 
-**IMPORTANT**: This bot stores all user private and public keys as **plaintext files** on the server where the bot is running. While the bot provides strong end-to-end encryption for messages, the security is **not 100% guaranteed** because:
+**IMPORTANT**: This bot stores all user private and public keys as files on the server where the bot is running. While the bot provides strong end-to-end encryption for messages, the security is **not 100% guaranteed** because:
 
-- Private keys are stored unencrypted in the `keys/` directory on the server
-- Anyone with access to the server filesystem can read all private keys
-- Server compromise would expose all user private keys
-- No additional encryption layer protects the stored keys
+- Private keys (even password-protected ones) are stored on the server filesystem
+- Anyone with access to the server filesystem can potentially access key files
+- Server compromise could expose private keys (though password-protected keys add an extra layer)
+- Password-protected keys require the password to be useful, but storage is still on the server
 
 **Use this bot only in environments where you trust the server security and administration.** For maximum security in sensitive environments, consider implementing additional key encryption or using hardware security modules (HSMs).
+
+## Private Key Password Protection
+
+The bot now supports optional password protection for private keys:
+
+- **Regenerate with Password**: Use `/regenerate-key` to create a new password-protected private key
+- **Automatic Detection**: The bot automatically detects if your key is password-protected
+- **Secure Password Entry**: When needed, passwords are entered via secure modal dialogs
+- **No Password Storage**: Passwords are never stored and are only used temporarily for key operations
+- **Backward Compatibility**: Existing unprotected keys continue to work normally
+
+**Note**: Password protection adds security against unauthorized key access, but remember that the password-protected key files are still stored on the server.
 
 ## File Structure
 
@@ -182,10 +203,35 @@ encryption, security, privacy, rsa, end-to-end, cryptography, messaging, discord
 
 4. Bot verifies Alice's signature and shows whether the message is authentic
 
+### Password-Protected Keys
+
+1. Alice wants to regenerate her key with password protection:
+   ```
+   /regenerate-key
+   ```
+
+2. Bot shows a warning about losing access to previous messages and a confirmation button
+
+3. Alice clicks "Confirm Regenerate Key" and enters a password in the secure modal
+
+4. Bot generates a new password-protected private key for Alice
+
+5. When Alice encrypts or signs messages, the bot prompts for her password:
+   ```
+   /encrypt "Secret message for Bob" @Bob
+   ```
+   
+6. Bot shows a password entry modal for Alice to unlock her private key
+
+7. When Bob (or anyone) tries to decrypt a message intended for Alice with a password-protected key, they'll be prompted for Alice's password if they are Alice, or denied access if they are not the intended recipient
+
 ## Important Notes
 
 - Private keys are stored locally in the `keys/` directory and should be kept secure
+- Private keys can optionally be password-protected for additional security
+- Users can regenerate their keys at any time using `/regenerate-key` (with optional password)
 - The bot needs to be running and accessible to decrypt messages
 - Users can only decrypt messages intended for them
 - All encrypted messages include a digital signature for authenticity verification
 - The bot automatically generates new key pairs for users when first needed
+- Password-protected keys require password entry for all cryptographic operations
