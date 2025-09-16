@@ -302,7 +302,7 @@ def encrypt_and_sign_message_with_password(message: str, sender_id: int, receive
     combined = encrypted_message + b"||SIGNATURE||" + signature
     return base64.b64encode(combined).decode('utf-8')
 
-def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id: int) -> str:
+def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id: int) -> tuple[str, bool]:
     """Decrypt message with receiver's private key and verify signature with sender's public key (no password support)"""
     try:
         # Decode base64
@@ -327,15 +327,19 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
         )
         
         # Verify signature
-        sender_public_key.verify(
-            signature,
-            encrypted_message,
-            padding.PSS(
+        try:
+            sender_public_key.verify(
+                signature,
+                encrypted_message,
+                padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
+                ),
+                hashes.SHA256()
+            )
+            signature_verified = True
+        except Exception:
+            signature_verified = False
         
         # Decrypt message
         decrypted_message = receiver_private_key.decrypt(
@@ -347,12 +351,12 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
             )
         )
         
-        return decrypted_message.decode('utf-8')
+        return decrypted_message.decode('utf-8'), signature_verified
     
     except Exception as e:
-        raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
+        raise ValueError(f"Failed to decrypt message: {str(e)}")
 
-def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, password: str = None) -> str:
+def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, password: str = None) -> tuple[str, bool]:
     """Decrypt message with receiver's private key and verify signature with sender's public key (with password support)"""
     try:
         # Decode base64
@@ -372,17 +376,21 @@ def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int
         sender_public_key = serialization.load_pem_public_key(
             sender_public_pem, backend=default_backend()
         )
-        
+
         # Verify signature
-        sender_public_key.verify(
-            signature,
-            encrypted_message,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
+        try:
+            sender_public_key.verify(
+                signature,
+                encrypted_message,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            signature_verified = True
+        except Exception:
+            signature_verified = False
         
         # Decrypt message
         decrypted_message = receiver_private_key.decrypt(
@@ -393,11 +401,11 @@ def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int
                 label=None
             )
         )
-        
-        return decrypted_message.decode('utf-8')
+
+        return decrypted_message.decode('utf-8'), signature_verified
     
     except Exception as e:
-        raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
+        raise ValueError(f"Failed to decrypt message: {str(e)}")
 
 def sign_message(message: str, sender_id: int) -> str:
     """Sign a message with sender's private key and return plaintext + signature (no password support)"""
@@ -768,7 +776,7 @@ async def decrypt_with_password_check(interaction: discord.Interaction, password
             await interaction.response.defer(ephemeral=True)
         
         # Decrypt and verify the message
-        decrypted_message = decrypt_and_verify_message_with_password(encrypted_data, sender_id, receiver_id, password)
+        decrypted_message, signature_verified = decrypt_and_verify_message_with_password(encrypted_data, sender_id, receiver_id, password)
         
         # Send decrypted message (ephemeral so only the user can see it)
         embed = discord.Embed(
@@ -777,7 +785,10 @@ async def decrypt_with_password_check(interaction: discord.Interaction, password
             color=0xff9900
         )
         embed.add_field(name="Original Message", value=decrypted_message, inline=False)
-        embed.set_footer(text="✅ Signature verified - message is authentic")
+        if signature_verified:
+            embed.set_footer(text="✅ Signature verified - message is authentic")
+        else:
+            embed.set_footer(text="❌ Signature could not be verified - message authenticity is uncertain")
         
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=True)
