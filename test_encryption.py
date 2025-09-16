@@ -14,12 +14,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bot import (
     generate_user_keys, 
     load_user_keys, 
-    encrypt_and_sign_message, 
-    decrypt_and_verify_message,
-    sign_message,
     verify_signed_message,
     KEYS_DIR,
-    # New password-related functions
+    # Password-related functions
     is_private_key_encrypted,
     load_private_key_with_password,
     encrypt_and_sign_message_with_password,
@@ -72,16 +69,18 @@ def test_encryption_decryption():
     # Test message
     original_message = "Hello Bob! This is a secret message from Alice. 🔒"
     
-    # Alice encrypts a message for Bob
-    encrypted_data = encrypt_and_sign_message(original_message, alice_id, bob_id)
+    # Alice encrypts a message for Bob (no password needed for new keys)
+    encrypted_data = encrypt_and_sign_message_with_password(original_message, alice_id, bob_id, None)
     print(f"✓ Encrypted message (length: {len(encrypted_data)} chars)")
     print(f"  Preview: {encrypted_data[:50]}...")
     
-    # Bob decrypts the message from Alice
-    decrypted_message = decrypt_and_verify_message(encrypted_data, alice_id, bob_id)
+    # Bob decrypts the message from Alice (no password needed for new keys)
+    decrypted_message, signature_verified = decrypt_and_verify_message_with_password(encrypted_data, alice_id, bob_id, None)
     print(f"✓ Decrypted message: '{decrypted_message}'")
+    print(f"✓ Signature verified: {signature_verified}")
     
     assert original_message == decrypted_message, "Message decryption failed"
+    assert signature_verified == True, "Signature verification failed"
     print("✓ Encryption/decryption cycle successful")
     
     return alice_id, bob_id, encrypted_data
@@ -92,16 +91,19 @@ def test_signature_verification():
     
     alice_id, bob_id, encrypted_data = test_encryption_decryption()
     
-    # Try to decrypt with wrong sender (should fail)
+    # Try to decrypt with wrong sender (should return False signature verification)
     try:
-        decrypt_and_verify_message(encrypted_data, bob_id, bob_id)  # Wrong sender
-        assert False, "Should have failed with wrong sender"
+        decrypted_message, signature_verified = decrypt_and_verify_message_with_password(encrypted_data, bob_id, bob_id, None)  # Wrong sender
+        if not signature_verified:
+            print("✓ Correctly detected wrong sender (signature verification failed)")
+        else:
+            assert False, "Should have detected wrong sender"
     except ValueError as e:
         print(f"✓ Correctly rejected wrong sender: {e}")
     
-    # Try to decrypt with wrong receiver (should fail)
+    # Try to decrypt with wrong receiver (should fail due to decryption)
     try:
-        decrypt_and_verify_message(encrypted_data, alice_id, alice_id)  # Wrong receiver
+        decrypt_and_verify_message_with_password(encrypted_data, alice_id, alice_id, None)  # Wrong receiver
         assert False, "Should have failed with wrong receiver"
     except ValueError as e:
         print(f"✓ Correctly rejected wrong receiver: {e}")
@@ -124,8 +126,11 @@ def test_sign_verify_message():
     # Test message
     original_message = "Hello! This is a signed message from Alice. ✍️"
     
-    # Alice signs a message
-    signed_data = sign_message(original_message, alice_id)
+    # Generate keys for Alice before signing
+    generate_user_keys(alice_id)
+    
+    # Alice signs a message (no password needed for new keys)
+    signed_data = sign_message_with_password(original_message, alice_id, None)
     print(f"✓ Signed message (length: {len(signed_data)} chars)")
     print(f"  Preview: {signed_data[:50]}...")
     
@@ -137,6 +142,8 @@ def test_sign_verify_message():
     print("✓ Sign/verify cycle successful")
     
     # Try to verify with wrong sender (should fail)
+    # Generate keys for Bob before using him as wrong sender
+    generate_user_keys(bob_id)
     try:
         verify_signed_message(signed_data, bob_id)  # Wrong sender
         assert False, "Should have failed with wrong sender"
@@ -161,6 +168,11 @@ def test_multiple_messages():
         if user_dir.exists():
             shutil.rmtree(user_dir)
     
+    # Generate keys for all users
+    generate_user_keys(alice_id)
+    generate_user_keys(bob_id) 
+    generate_user_keys(charlie_id)
+    
     messages = [
         "Short message",
         "This is a longer message with more content to test encryption of various message lengths.",
@@ -173,14 +185,16 @@ def test_multiple_messages():
         print(f"  Testing message {i+1}: '{message[:30]}{'...' if len(message) > 30 else ''}'")
         
         # Alice sends to Bob
-        encrypted = encrypt_and_sign_message(message, alice_id, bob_id)
-        decrypted = decrypt_and_verify_message(encrypted, alice_id, bob_id)
+        encrypted = encrypt_and_sign_message_with_password(message, alice_id, bob_id, None)
+        decrypted, verified = decrypt_and_verify_message_with_password(encrypted, alice_id, bob_id, None)
         assert message == decrypted, f"Message {i+1} failed"
+        assert verified == True, f"Signature verification failed for message {i+1}"
         
         # Bob sends to Charlie
-        encrypted = encrypt_and_sign_message(message, bob_id, charlie_id)
-        decrypted = decrypt_and_verify_message(encrypted, bob_id, charlie_id)
+        encrypted = encrypt_and_sign_message_with_password(message, bob_id, charlie_id, None)
+        decrypted, verified = decrypt_and_verify_message_with_password(encrypted, bob_id, charlie_id, None)
         assert message == decrypted, f"Message {i+1} failed"
+        assert verified == True, f"Signature verification failed for message {i+1}"
     
     print("✓ All messages encrypted/decrypted successfully")
 
@@ -197,6 +211,10 @@ def test_multiple_signed_messages():
         if user_dir.exists():
             shutil.rmtree(user_dir)
     
+    # Generate keys for both users
+    generate_user_keys(alice_id)
+    generate_user_keys(bob_id)
+    
     messages = [
         "Short signed message",
         "This is a longer signed message with more content to test signing of various message lengths.",
@@ -209,12 +227,12 @@ def test_multiple_signed_messages():
         print(f"  Testing signed message {i+1}: '{message[:30]}{'...' if len(message) > 30 else ''}'")
         
         # Alice signs message
-        signed = sign_message(message, alice_id)
+        signed = sign_message_with_password(message, alice_id, None)
         verified = verify_signed_message(signed, alice_id)
         assert message == verified, f"Signed message {i+1} failed"
         
         # Bob signs message
-        signed = sign_message(message, bob_id)
+        signed = sign_message_with_password(message, bob_id, None)
         verified = verify_signed_message(signed, bob_id)
         assert message == verified, f"Signed message {i+1} failed"
     
@@ -287,10 +305,12 @@ def test_password_protected_encryption():
     print(f"✓ Encrypted message with password-protected sender key")
     
     # Bob decrypts the message from Alice (Bob's key is not password-protected)
-    decrypted_message = decrypt_and_verify_message_with_password(encrypted_data, alice_id, bob_id, None)
+    decrypted_message, signature_verified = decrypt_and_verify_message_with_password(encrypted_data, alice_id, bob_id, None)
     print(f"✓ Decrypted message: '{decrypted_message}'")
+    print(f"✓ Signature verified: {signature_verified}")
     
     assert original_message == decrypted_message, "Message encryption/decryption failed"
+    assert signature_verified == True, "Signature verification failed"
     print("✓ Password-protected encryption/decryption cycle successful")
     
     # Test decryption with wrong sender password (should fail during encryption)
@@ -351,72 +371,32 @@ def test_mixed_password_scenarios():
     # Test: Alice (password-protected) sends to Charlie (password-protected)
     message1 = "Hello Charlie from Alice! Both our keys are password-protected. 🔐🔐"
     encrypted1 = encrypt_and_sign_message_with_password(message1, alice_id, charlie_id, alice_password)
-    decrypted1 = decrypt_and_verify_message_with_password(encrypted1, alice_id, charlie_id, charlie_password)
+    decrypted1, verified1 = decrypt_and_verify_message_with_password(encrypted1, alice_id, charlie_id, charlie_password)
     assert message1 == decrypted1, "Password-to-password encryption failed"
+    assert verified1 == True, "Password-to-password signature verification failed"
     print("✓ Password-protected sender to password-protected receiver works")
     
     # Test: Bob (no password) sends to Charlie (password-protected)
     message2 = "Hello Charlie from Bob! My key has no password but yours does. 🔓🔐"
     encrypted2 = encrypt_and_sign_message_with_password(message2, bob_id, charlie_id, None)
-    decrypted2 = decrypt_and_verify_message_with_password(encrypted2, bob_id, charlie_id, charlie_password)
+    decrypted2, verified2 = decrypt_and_verify_message_with_password(encrypted2, bob_id, charlie_id, charlie_password)
     assert message2 == decrypted2, "No-password-to-password encryption failed"
+    assert verified2 == True, "No-password-to-password signature verification failed"
     print("✓ Non-password sender to password-protected receiver works")
     
     # Test: Alice (password-protected) sends to Bob (no password)
     message3 = "Hello Bob from Alice! My key has password but yours doesn't. 🔐🔓"
     encrypted3 = encrypt_and_sign_message_with_password(message3, alice_id, bob_id, alice_password)
-    decrypted3 = decrypt_and_verify_message_with_password(encrypted3, alice_id, bob_id, None)
+    decrypted3, verified3 = decrypt_and_verify_message_with_password(encrypted3, alice_id, bob_id, None)
     assert message3 == decrypted3, "Password-to-no-password encryption failed"
+    assert verified3 == True, "Password-to-no-password signature verification failed"
     print("✓ Password-protected sender to non-password receiver works")
     
     print("✓ All mixed password scenarios working correctly")
     
     return alice_id, bob_id, charlie_id, alice_password, charlie_password
 
-def test_backward_compatibility():
-    """Test that old functions still work with new keys"""
-    print("\nTesting backward compatibility...")
-    
-    alice_id, bob_id, charlie_id, alice_password, charlie_password = test_mixed_password_scenarios()
-    
-    # Test that old functions work with non-password-protected keys
-    message = "Testing backward compatibility with Bob's regular key."
-    
-    # Use old functions (should work with Bob's non-password key)
-    encrypted_old = encrypt_and_sign_message(message, bob_id, bob_id)
-    decrypted_old = decrypt_and_verify_message(encrypted_old, bob_id, bob_id)
-    assert message == decrypted_old, "Backward compatibility for encryption failed"
-    print("✓ Old encryption functions work with regular keys")
-    
-    signed_old = sign_message(message, bob_id)
-    verified_old = verify_signed_message(signed_old, bob_id)
-    assert message == verified_old, "Backward compatibility for signing failed"
-    print("✓ Old signing functions work with regular keys")
-    
-    # Test that old functions fail gracefully with password-protected keys
-    try:
-        encrypt_and_sign_message(message, alice_id, bob_id)  # Alice has password-protected key
-        assert False, "Should have failed with password-protected sender key"
-    except (TypeError, ValueError):
-        print("✓ Old encryption function correctly fails with password-protected sender key")
-    
-    try:
-        sign_message(message, alice_id)  # Alice has password-protected key
-        assert False, "Should have failed with password-protected key"
-    except (TypeError, ValueError):
-        print("✓ Old signing function correctly fails with password-protected key")
-    
-    # Test that old decryption fails gracefully with password-protected receiver
-    try:
-        # First create a valid encrypted message from Bob to Charlie
-        encrypted_for_charlie = encrypt_and_sign_message_with_password(message, bob_id, charlie_id, None)
-        # Try to decrypt with old function (should fail because Charlie's key is password-protected)
-        decrypt_and_verify_message(encrypted_for_charlie, bob_id, charlie_id)
-        assert False, "Should have failed with password-protected receiver key"
-    except (TypeError, ValueError):
-        print("✓ Old decryption function correctly fails with password-protected receiver key")
-    
-    print("✓ Backward compatibility tests passed")
+
     
     return alice_id, bob_id, charlie_id
 
@@ -465,7 +445,6 @@ def main():
         test_password_protected_encryption()
         test_password_protected_signing()
         test_mixed_password_scenarios()
-        test_backward_compatibility()
         
         print("\n" + "=" * 40)
         print("🎉 All tests passed!")
