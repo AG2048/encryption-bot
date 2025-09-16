@@ -230,43 +230,7 @@ def load_user_keys(user_id: int) -> tuple[bytes, bytes]:
     
     return private_pem, public_pem
 
-def encrypt_and_sign_message(message: str, sender_id: int, receiver_id: int) -> str:
-    """Encrypt message with receiver's public key and sign with sender's private key (no password support)"""
-    # Load sender's private key and receiver's public key
-    sender_private_pem, _ = load_user_keys(sender_id)
-    _, receiver_public_pem = load_user_keys(receiver_id)
-    
-    # Load keys
-    sender_private_key = serialization.load_pem_private_key(
-        sender_private_pem, password=None, backend=default_backend()
-    )
-    receiver_public_key = serialization.load_pem_public_key(
-        receiver_public_pem, backend=default_backend()
-    )
-    
-    # Encrypt the message with receiver's public key
-    encrypted_message = receiver_public_key.encrypt(
-        message.encode('utf-8'),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    
-    # Sign the encrypted message with sender's private key
-    signature = sender_private_key.sign(
-        encrypted_message,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH
-        ),
-        hashes.SHA256()
-    )
-    
-    # Combine encrypted message and signature, then encode in base64
-    combined = encrypted_message + b"||SIGNATURE||" + signature
-    return base64.b64encode(combined).decode('utf-8')
+
 
 def encrypt_and_sign_message_with_password(message: str, sender_id: int, receiver_id: int, password: str = None) -> str:
     """Encrypt message with receiver's public key and sign with sender's private key (with password support)"""
@@ -302,59 +266,7 @@ def encrypt_and_sign_message_with_password(message: str, sender_id: int, receive
     combined = encrypted_message + b"||SIGNATURE||" + signature
     return base64.b64encode(combined).decode('utf-8')
 
-def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id: int) -> tuple[str, bool]:
-    """Decrypt message with receiver's private key and verify signature with sender's public key (no password support)"""
-    try:
-        # Decode base64
-        combined = base64.b64decode(encrypted_data.encode('utf-8'))
-        
-        # Split encrypted message and signature
-        parts = combined.split(b"||SIGNATURE||")
-        if len(parts) != 2:
-            raise ValueError("Invalid message format")
-        
-        encrypted_message, signature = parts
-        
-        # Load receiver's private key and sender's public key
-        receiver_private_pem, _ = load_user_keys(receiver_id)
-        _, sender_public_pem = load_user_keys(sender_id)
-        
-        receiver_private_key = serialization.load_pem_private_key(
-            receiver_private_pem, password=None, backend=default_backend()
-        )
-        sender_public_key = serialization.load_pem_public_key(
-            sender_public_pem, backend=default_backend()
-        )
-        
-        # Verify signature
-        try:
-            sender_public_key.verify(
-                signature,
-                encrypted_message,
-                padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            signature_verified = True
-        except Exception:
-            signature_verified = False
-        
-        # Decrypt message
-        decrypted_message = receiver_private_key.decrypt(
-            encrypted_message,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
-        
-        return decrypted_message.decode('utf-8'), signature_verified
-    
-    except Exception as e:
-        raise ValueError(f"Failed to decrypt message: {str(e)}")
+
 
 def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, password: str = None) -> tuple[str, bool]:
     """Decrypt message with receiver's private key and verify signature with sender's public key (with password support)"""
@@ -407,29 +319,7 @@ def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int
     except Exception as e:
         raise ValueError(f"Failed to decrypt message: {str(e)}")
 
-def sign_message(message: str, sender_id: int) -> str:
-    """Sign a message with sender's private key and return plaintext + signature (no password support)"""
-    # Load sender's private key
-    sender_private_pem, _ = load_user_keys(sender_id)
-    
-    sender_private_key = serialization.load_pem_private_key(
-        sender_private_pem, password=None, backend=default_backend()
-    )
-    
-    # Sign the message
-    message_bytes = message.encode('utf-8')
-    signature = sender_private_key.sign(
-        message_bytes,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH
-        ),
-        hashes.SHA256()
-    )
-    
-    # Combine message and signature, then encode in base64
-    combined = message_bytes + b"||SIGNATURE||" + signature
-    return base64.b64encode(combined).decode('utf-8')
+
 
 def sign_message_with_password(message: str, sender_id: int, password: str = None) -> str:
     """Sign a message with sender's private key and return plaintext + signature (with password support)"""
