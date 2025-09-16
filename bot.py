@@ -484,8 +484,8 @@ def verify_signed_message(signed_data: str, sender_id: int) -> str:
         
         return message_bytes.decode('utf-8')
     
-    except Exception as e:
-        raise ValueError(f"Failed to verify signed message: {str(e)}")
+    except Exception:
+        raise ValueError(f"Cannot verify signed message")
 
 @discord.app_commands.allowed_installs(guilds=True, users=True)
 @discord.app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
