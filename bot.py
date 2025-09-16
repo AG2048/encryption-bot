@@ -32,7 +32,8 @@ class PasswordModal(discord.ui.Modal, title='Enter Password'):
     
     async def on_submit(self, interaction: discord.Interaction):
         password = self.password.value
-        await self.callback_func(interaction, password, *self.args, **self.kwargs)
+        # interaction is always first arg, the rest should all be passed as kwargs when instantiating PasswordModal
+        await self.callback_func(interaction, password=password, *self.args, **self.kwargs)
 
 class RegenerateKeyModal(discord.ui.Modal, title='Regenerate Private Key'):
     """Modal for regenerating private key with optional password"""
@@ -267,10 +268,10 @@ def encrypt_and_sign_message(message: str, sender_id: int, receiver_id: int) -> 
     combined = encrypted_message + b"||SIGNATURE||" + signature
     return base64.b64encode(combined).decode('utf-8')
 
-def encrypt_and_sign_message_with_password(message: str, sender_id: int, receiver_id: int, sender_password: str = None) -> str:
+def encrypt_and_sign_message_with_password(message: str, sender_id: int, receiver_id: int, password: str = None) -> str:
     """Encrypt message with receiver's public key and sign with sender's private key (with password support)"""
     # Load sender's private key with password and receiver's public key
-    sender_private_key = load_private_key_with_password(sender_id, sender_password)
+    sender_private_key = load_private_key_with_password(sender_id, password)
     _, receiver_public_pem = load_user_keys(receiver_id)
     
     receiver_public_key = serialization.load_pem_public_key(
@@ -351,7 +352,7 @@ def decrypt_and_verify_message(encrypted_data: str, sender_id: int, receiver_id:
     except Exception as e:
         raise ValueError(f"Failed to decrypt/verify message: {str(e)}")
 
-def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, receiver_password: str = None) -> str:
+def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int, receiver_id: int, password: str = None) -> str:
     """Decrypt message with receiver's private key and verify signature with sender's public key (with password support)"""
     try:
         # Decode base64
@@ -365,7 +366,7 @@ def decrypt_and_verify_message_with_password(encrypted_data: str, sender_id: int
         encrypted_message, signature = parts
         
         # Load receiver's private key with password and sender's public key
-        receiver_private_key = load_private_key_with_password(receiver_id, receiver_password)
+        receiver_private_key = load_private_key_with_password(receiver_id, password)
         _, sender_public_pem = load_user_keys(sender_id)
         
         sender_public_key = serialization.load_pem_public_key(
@@ -422,10 +423,10 @@ def sign_message(message: str, sender_id: int) -> str:
     combined = message_bytes + b"||SIGNATURE||" + signature
     return base64.b64encode(combined).decode('utf-8')
 
-def sign_message_with_password(message: str, sender_id: int, sender_password: str = None) -> str:
+def sign_message_with_password(message: str, sender_id: int, password: str = None) -> str:
     """Sign a message with sender's private key and return plaintext + signature (with password support)"""
     # Load sender's private key with password
-    sender_private_key = load_private_key_with_password(sender_id, sender_password)
+    sender_private_key = load_private_key_with_password(sender_id, password)
     
     # Sign the message
     message_bytes = message.encode('utf-8')
@@ -591,7 +592,7 @@ async def help_command(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-async def encrypt_with_password_check(interaction: discord.Interaction, message: str, receiver: discord.User, sender_password: str = None):
+async def encrypt_with_password_check(interaction: discord.Interaction, message: str, receiver: discord.User, password: str = None):
     """Helper function to encrypt message after password check"""
     try:
         # Ensure both users have keys
@@ -599,7 +600,7 @@ async def encrypt_with_password_check(interaction: discord.Interaction, message:
         load_user_keys(receiver.id)
         
         # Encrypt and sign the message
-        encrypted_data = encrypt_and_sign_message_with_password(message, interaction.user.id, receiver.id, sender_password)
+        encrypted_data = encrypt_and_sign_message_with_password(message, interaction.user.id, receiver.id, password)
         
         # Create embed for the encrypted message
         embed = discord.Embed(
@@ -650,7 +651,7 @@ async def encrypt_command(interaction: discord.Interaction, message: str, receiv
         # Check if sender's private key is password-protected
         if is_private_key_encrypted(interaction.user.id):
             # Need password - show modal
-            modal = PasswordModal(encrypt_with_password_check, message, receiver)
+            modal = PasswordModal(encrypt_with_password_check, message=message, receiver=receiver)
             await interaction.response.send_modal(modal)
         else:
             # No password needed - use regular function
@@ -687,14 +688,14 @@ async def publickey_command(interaction: discord.Interaction, user: discord.User
     except Exception as e:
         await interaction.response.send_message(f"❌ Error retrieving public key: {str(e)}", ephemeral=True)
 
-async def sign_with_password_check(interaction: discord.Interaction, message: str, sender_password: str = None):
+async def sign_with_password_check(interaction: discord.Interaction, message: str, password: str = None):
     """Helper function to sign message after password check"""
     try:
         # Ensure user has keys
         load_user_keys(interaction.user.id)
         
         # Sign the message
-        signed_data = sign_message_with_password(message, interaction.user.id, sender_password)
+        signed_data = sign_message_with_password(message, interaction.user.id, password)
         
         # Create embed for the signed message
         embed = discord.Embed(
@@ -742,7 +743,7 @@ async def sign_command(interaction: discord.Interaction, message: str):
         # Check if sender's private key is password-protected
         if is_private_key_encrypted(interaction.user.id):
             # Need password - show modal
-            modal = PasswordModal(sign_with_password_check, message)
+            modal = PasswordModal(sign_with_password_check, message=message)
             await interaction.response.send_modal(modal)
         else:
             # No password needed - use regular function
@@ -755,7 +756,7 @@ async def sign_command(interaction: discord.Interaction, message: str):
         else:
             await interaction.followup.send(f"❌ Error signing message: {str(e)}", ephemeral=True)
 
-async def decrypt_with_password_check(interaction: discord.Interaction, receiver_password: str, encrypted_data: str, sender_id: int, receiver_id: int, intended_receiver_id: int):
+async def decrypt_with_password_check(interaction: discord.Interaction, password: str, encrypted_data: str, sender_id: int, receiver_id: int, intended_receiver_id: int):
     """Helper function to decrypt message after password check"""
     try:
         # Check if the user is the intended recipient
@@ -767,7 +768,7 @@ async def decrypt_with_password_check(interaction: discord.Interaction, receiver
             await interaction.response.defer(ephemeral=True)
         
         # Decrypt and verify the message
-        decrypted_message = decrypt_and_verify_message_with_password(encrypted_data, sender_id, receiver_id, receiver_password)
+        decrypted_message = decrypt_and_verify_message_with_password(encrypted_data, sender_id, receiver_id, password)
         
         # Send decrypted message (ephemeral so only the user can see it)
         embed = discord.Embed(
@@ -857,7 +858,7 @@ async def decrypt_message_context(interaction: discord.Interaction, message: dis
         # Check if receiver's private key is password-protected
         if is_private_key_encrypted(receiver_id):
             # Need password - show modal
-            modal = PasswordModal(decrypt_with_password_check, encrypted_data, sender_id, receiver_id, intended_receiver_id)
+            modal = PasswordModal(decrypt_with_password_check, encrypted_data=encrypted_data, sender_id=sender_id, receiver_id=receiver_id, intended_receiver_id=intended_receiver_id)
             await interaction.response.send_modal(modal)
         else:
             # No password needed - use regular function
